@@ -1,0 +1,8 @@
+# Polymarket Crypto 5-Minute Prediction Bot
+# Install with: pip install -r requirements.txt
+
+python-dotenv>=1.0.0        # Load .env configuration
+websockets>=12.0            # Async WebSocket client (Binance + Polymarket)
+aiohttp>=3.9.0              # Async HTTP client for REST fallback
+requests>=2.31.0            # Sync HTTP for Gamma API discovery
+py-clob-client>=0.17.0      # Official Polymarket CLOB Python client
