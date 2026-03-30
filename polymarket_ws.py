@@ -128,6 +128,10 @@ class PolymarketMarketWS:
         except json.JSONDecodeError:
             return
 
+        # Polymarket sometimes sends arrays — we only handle dicts
+        if not isinstance(data, dict):
+            return
+
         # Handle price update messages
         msg_type = data.get("type", "")
         if msg_type in ("price_change", "last_trade_price"):

@@ -163,12 +163,6 @@ async def _stream_symbol(
                         close_time=int(k["T"]),
                     )
                     candle_buffer.add(candle)
-                    print(
-                        f"[WS-BIN] {symbol} candle closed: "
-                        f"O={candle.open_price:.2f} C={candle.close_price:.2f} "
-                        f"({'🟢' if candle.is_green else '🔴'} "
-                        f"{candle.change_percent:.3f}%)"
-                    )
 
                     # Push to main loop queue if we have 2 candles
                     if candle_buffer.has_enough(symbol):

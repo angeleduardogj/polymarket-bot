@@ -18,6 +18,7 @@ import asyncio
 import random
 import signal
 import sys
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from config.settings import Settings, load_settings
@@ -27,6 +28,11 @@ from risk_manager import RiskManager
 from polymarket_rest import ClobClientWrapper, GammaClient, PolymarketMarket
 from polymarket_ws import PolymarketMarketWS, PolymarketUserWS
 from logger import TradeLogger
+
+
+def _ts() -> str:
+    """Short UTC timestamp for console lines."""
+    return datetime.now(timezone.utc).strftime("%H:%M:%S")
 
 
 # ── PnL simulation ───────────────────────────────────────────────────
@@ -127,8 +133,12 @@ async def process_candles(
             saldo_after=balance,
             comentario=sig.reason,
         )
+        # Compact one-liner for skips
+        c1_icon = "🟢" if sig.candle_1.is_green else "🔴"
+        c2_icon = "🟢" if sig.candle_2.is_green else "🔴"
         print(
-            f"[BOT] {symbol} → {sig.trend.value} | Sin apuesta: {sig.reason}"
+            f"  {symbol:4s} {c1_icon}{sig.candle_1.change_percent:.3f}% {c2_icon}{sig.candle_2.change_percent:.3f}% "
+            f"→ ⏭ {sig.reason}"
         )
         return
 
@@ -148,7 +158,7 @@ async def process_candles(
             saldo_after=balance,
             comentario=f"Bloqueado: {reason}",
         )
-        print(f"[BOT] {symbol} → BLOQUEADO: {reason}")
+        print(f"  {symbol:4s} 🚫 BLOQUEADO: {reason}")
         return
 
     # ── Discover Polymarket market ──
@@ -202,10 +212,11 @@ async def process_candles(
         )
 
         result_icon = "✅" if sim["pnl_after_fees"] > 0 else "❌"
+        trend_icon = "📈" if sig.trend == Trend.BULLISH else "📉"
         print(
-            f"[BOT] {result_icon} {symbol} | {sig.trend.value} → {sig.bet_side.value} "
-            f"${sig.bet_amount:.2f} | PnL: ${sim['pnl_after_fees']:.4f} "
-            f"(fee={sim['fee_percent']:.1f}%, spread={sim['spread_percent']:.1f}%) "
+            f"  {symbol:4s} {trend_icon} {sig.trend.value} → {sig.bet_side.value} "
+            f"${sig.bet_amount:.2f} {result_icon} PnL: ${sim['pnl_after_fees']:+.4f} "
+            f"| fee {sim['fee_percent']:.1f}% spread {sim['spread_percent']:.1f}% "
             f"| Saldo: ${saldo_after:.2f}"
         )
 
@@ -412,24 +423,34 @@ async def main() -> None:
     print()
 
     # ── Main event loop ──
+    cycle_count = 0
+    last_heartbeat = 0
+
     try:
         while not stop_event.is_set():
             try:
-                # Wait for a candle pair from any symbol
                 candles = await asyncio.wait_for(
-                    candle_queue.get(), timeout=60.0
+                    candle_queue.get(), timeout=300.0
                 )
             except asyncio.TimeoutError:
-                # Print a heartbeat every minute
+                # Heartbeat only once per 5-min timeout
                 status = risk_mgr.get_status()
                 print(
-                    f"[♥] Esperando velas ... "
-                    f"Trades hoy: {status['trades_today']} | "
-                    f"PnL hoy: ${status['total_pnl_today']:.2f} | "
-                    f"Apostado: ${status['total_wagered_today']:.2f}/"
+                    f"[{_ts()}] ♥ Esperando velas ... "
+                    f"Trades: {status['trades_today']} | "
+                    f"PnL: ${status['total_pnl_today']:+.2f} | "
+                    f"${status['total_wagered_today']:.2f}/"
                     f"${settings.max_daily_risk:.2f}"
                 )
                 continue
+
+            # Print cycle header when first symbol arrives
+            symbol = candles[-1].symbol
+            cycle_count += 1
+            if symbol == settings.crypto_list[0] or cycle_count == 1:
+                print(f"\n{'─' * 55}")
+                print(f"[{_ts()}] 📊 Ciclo #{cycle_count // len(settings.crypto_list) + 1}")
+                print(f"{'─' * 55}")
 
             # Process the candle pair
             await process_candles(

@@ -42,97 +42,102 @@ class GammaClient:
         self._cache: Dict[str, tuple] = {}  # symbol -> (market, timestamp)
         self._cache_ttl = 60  # seconds
 
+    def _build_slug(self, symbol: str, window_ts: int) -> str:
+        """Build the Polymarket 5-minute slug: {symbol}-updown-5m-{window_ts}."""
+        return f"{symbol.lower()}-updown-5m-{window_ts}"
+
+    def _fetch_event_by_slug(self, slug: str) -> Optional[dict]:
+        """Fetch a single event from Gamma API by its slug."""
+        try:
+            url = f"{self.base_url}/events"
+            resp = requests.get(url, params={"slug": slug}, timeout=5)
+            resp.raise_for_status()
+            data = resp.json()
+            if data and isinstance(data, list) and len(data) > 0:
+                return data[0]
+        except requests.RequestException as e:
+            print(f"[GAMMA] Error fetching slug {slug}: {e}")
+        return None
+
+    def _parse_event_to_market(
+        self, event: dict, slug: str
+    ) -> Optional[PolymarketMarket]:
+        """Parse a Gamma event JSON into a PolymarketMarket."""
+        markets = event.get("markets", [])
+        if not markets:
+            return None
+
+        m = markets[0]  # 5-min events have exactly 1 market
+        clob_ids = m.get("clobTokenIds", [])
+        if not clob_ids or len(clob_ids) < 2:
+            return None
+
+        outcomes = m.get("outcomes", ["Yes", "No"])
+        # Parse outcomes list if it's a JSON string
+        if isinstance(outcomes, str):
+            try:
+                import json
+                outcomes = json.loads(outcomes)
+            except (json.JSONDecodeError, TypeError):
+                outcomes = ["Yes", "No"]
+
+        return PolymarketMarket(
+            condition_id=m.get("conditionId", ""),
+            question=m.get("question", event.get("title", "")),
+            slug=slug,
+            token_id_yes=clob_ids[0],
+            token_id_no=clob_ids[1],
+            end_date=m.get("endDate", ""),
+            market_url=f"https://polymarket.com/event/{slug}",
+            active=m.get("active", True),
+            outcomes=outcomes,
+        )
+
     def find_5m_market(self, symbol: str) -> Optional[PolymarketMarket]:
         """
-        Search for an active 5-minute prediction market for the given crypto.
+        Find the current active 5-minute prediction market for a crypto.
 
-        Args:
-            symbol: e.g. "BTC", "ETH"
+        Uses the slug pattern: {symbol}-updown-5m-{window_ts}
+        where window_ts = now - (now % 300), incrementing every 5 minutes.
 
-        Returns:
-            A PolymarketMarket if found, else None.
+        Tries the current window first, then the previous window as fallback.
         """
-        # Check cache
+        # Check cache (valid for 30s to stay fresh within a 5-min window)
         cached = self._cache.get(symbol)
         if cached:
             market, ts = cached
-            if time.time() - ts < self._cache_ttl:
+            if time.time() - ts < 30:
                 return market
 
-        try:
-            # Search for 5-minute crypto markets via the events endpoint
-            url = f"{self.base_url}/events"
-            params = {
-                "active": "true",
-                "closed": "false",
-                "limit": 50,
-            }
-            resp = requests.get(url, params=params, timeout=10)
-            resp.raise_for_status()
-            events = resp.json()
+        now = int(time.time())
+        current_window = now - (now % 300)
+        prev_window = current_window - 300
 
-            # Search through events for matching 5-minute market
-            for event in events:
-                title = (event.get("title", "") or "").lower()
-                # Also search individual markets within the event
-                markets = event.get("markets", [])
-                for m in markets:
-                    question = (m.get("question", "") or "").lower()
-                    combined = title + " " + question
+        # Try current window first, then previous
+        for window_ts in [current_window, prev_window]:
+            slug = self._build_slug(symbol, window_ts)
+            print(f"[GAMMA] 🔍 {slug}")
 
-                    # Look for the crypto symbol AND a 5-minute indicator
-                    sym_lower = symbol.lower()
-                    full_name = {
-                        "btc": "bitcoin",
-                        "eth": "ethereum",
-                        "sol": "solana",
-                        "xrp": "xrp",
-                    }.get(sym_lower, sym_lower)
+            event = self._fetch_event_by_slug(slug)
+            if event:
+                market = self._parse_event_to_market(event, slug)
+                if market and market.active:
+                    print(f"[GAMMA] ✅ {symbol.upper()}: {market.question}")
+                    self._cache[symbol] = (market, time.time())
+                    return market
 
-                    has_symbol = (sym_lower in combined) or (full_name in combined)
-                    has_5min = any(kw in combined for kw in [
-                        "5 min", "5min", "five min", "5-min", "5 minute",
-                    ])
+        # Not found in either window
+        print(f"[GAMMA] ❌ No 5-min market for {symbol.upper()}")
+        self._cache[symbol] = (None, time.time())  # type: ignore
+        return None
 
-                    if has_symbol and has_5min and m.get("active", False):
-                        # Extract token IDs from clobTokenIds
-                        clob_ids = m.get("clobTokenIds", [])
-                        outcomes = m.get("outcomes", ["Yes", "No"])
-                        token_yes = clob_ids[0] if len(clob_ids) > 0 else ""
-                        token_no = clob_ids[1] if len(clob_ids) > 1 else ""
-
-                        slug = m.get("slug", event.get("slug", ""))
-                        market = PolymarketMarket(
-                            condition_id=m.get("conditionId", ""),
-                            question=m.get("question", event.get("title", "")),
-                            slug=slug,
-                            token_id_yes=token_yes,
-                            token_id_no=token_no,
-                            end_date=m.get("endDate", ""),
-                            market_url=f"https://polymarket.com/markets/{slug}" if slug else "",
-                            active=True,
-                            outcomes=outcomes,
-                        )
-                        self._cache[symbol] = (market, time.time())
-                        return market
-
-            # Not found
-            self._cache[symbol] = (None, time.time())  # type: ignore
-            return None
-
-        except requests.RequestException as e:
-            print(f"[GAMMA] Error fetching markets for {symbol}: {e}")
-            return None
-
-    def find_all_5m_markets(self, symbols: List[str]) -> Dict[str, Optional[PolymarketMarket]]:
-        """Find 5-minute markets for all symbols."""
+    def find_all_5m_markets(
+        self, symbols: List[str]
+    ) -> Dict[str, Optional[PolymarketMarket]]:
+        """Find current 5-minute markets for all symbols."""
         result: Dict[str, Optional[PolymarketMarket]] = {}
         for sym in symbols:
             result[sym] = self.find_5m_market(sym)
-            if result[sym]:
-                print(f"[GAMMA] ✓ Found market for {sym}: {result[sym].question}")
-            else:
-                print(f"[GAMMA] ✗ No 5-minute market found for {sym}")
         return result
 
 
