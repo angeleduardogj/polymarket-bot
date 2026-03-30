@@ -238,14 +238,14 @@ async def process_candles(
         )
 
         # Get Polymarket price for comparison
+        # Midpoint is the token probability (0.0–1.0), e.g. 0.52 = 52% chance YES
         poly_price = clob.get_midpoint(token_id) or 0.0
-        poly_price_entry = poly_price * sig.candle_2.close_price if poly_price else 0.0
+        polymarket_price_entry = poly_price  # probability / share price
 
         # Also calculate simulated PnL for comparison
         sim = simulate_pnl(sig, settings)
-        price_disc = 0.0
-        if poly_price_entry > 0 and sig.candle_2.close_price > 0:
-            price_disc = (poly_price_entry - sig.candle_2.close_price) / sig.candle_2.close_price * 100
+        # price_discrepancy: diff between Binance-derived sim price and actual midpoint
+        price_disc = sim["price_discrepancy"]
 
         if resp:
             # Order placed — will track resolution via User WS
@@ -263,7 +263,7 @@ async def process_candles(
                 monto=sig.bet_amount,
                 modo="REAL",
                 binance_price_entry=sig.candle_2.close_price,
-                polymarket_price_entry=poly_price_entry,
+                polymarket_price_entry=polymarket_price_entry,
                 market_url=market_url,
                 fee_percent=sim["fee_percent"],
                 spread_percent=sim["spread_percent"],
@@ -278,9 +278,15 @@ async def process_candles(
                 coincidencia_sim_real="pendiente",
                 comentario=f"Orden real enviada — {resp}",
             )
+            # Console output per prompt point 7: show all key fields
             print(
                 f"[BOT] 📤 {symbol} | {sig.trend.value} → {sig.bet_side.value} "
-                f"${sig.bet_amount:.2f} | ORDEN REAL ENVIADA"
+                f"${sig.bet_amount:.2f} | ORDEN REAL ENVIADA\n"
+                f"      binance_price: {sig.candle_2.close_price:.2f} | "
+                f"poly_price: {polymarket_price_entry:.4f} | "
+                f"url: {market_url}\n"
+                f"      simulado_pnl: ${sim['pnl_after_fees']:.4f} | "
+                f"real_pnl: pendiente"
             )
         else:
             # Order failed — unlock balance

@@ -49,7 +49,14 @@ class PolymarketMarketWS:
 
     async def run(self, stop_event: asyncio.Event) -> None:
         """Main connection loop with auto-reconnect."""
-        backoff = 1
+        # No assets to track → skip connection entirely to avoid spam
+        if not self._subscribed_assets:
+            print("[WS-MKT] No hay assets suscritos — canal de mercado inactivo")
+            # Wait until stop so we don't exit the task
+            await stop_event.wait()
+            return
+
+        backoff = 5
 
         while not stop_event.is_set():
             try:
@@ -59,7 +66,7 @@ class PolymarketMarketWS:
                 ) as ws:
                     self._ws = ws
                     self._connected = True
-                    backoff = 1
+                    backoff = 5
                     print(f"[WS-MKT] ✓ Connected")
 
                     # Subscribe to assets

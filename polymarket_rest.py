@@ -109,7 +109,7 @@ class GammaClient:
                             token_id_yes=token_yes,
                             token_id_no=token_no,
                             end_date=m.get("endDate", ""),
-                            market_url=f"https://polymarket.com/event/{slug}" if slug else "",
+                            market_url=f"https://polymarket.com/markets/{slug}" if slug else "",
                             active=True,
                             outcomes=outcomes,
                         )

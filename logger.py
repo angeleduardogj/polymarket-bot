@@ -85,8 +85,8 @@ class TradeLogger:
             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             "moneda": moneda,
             "precio_vela_1_apertura": f"{precio_vela_1_apertura:.6f}",
-            "precio_vela_2_apertura": f"{precio_vela_2_apertura:.6f}",
             "precio_vela_1_cierre": f"{precio_vela_1_cierre:.6f}",
+            "precio_vela_2_apertura": f"{precio_vela_2_apertura:.6f}",
             "precio_vela_2_cierre": f"{precio_vela_2_cierre:.6f}",
             "tendencia": tendencia,
             "apuesta": apuesta,
@@ -158,7 +158,7 @@ class TradeLogger:
 
     def _get_filepath(self) -> str:
         """Return today's CSV file path, creating the file with headers if new."""
-        today = datetime.now(timezone.utc).strftime("%Y_%m_%d")
+        today = datetime.now(timezone.utc).strftime("%Y%m%d")
         if self._current_date != today:
             self._current_date = today
             self._current_file = os.path.join(
